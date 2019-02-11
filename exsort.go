@@ -3,65 +3,65 @@ package exsort
 import (
 	"bufio"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 )
 
 //ExternalSort :nodoc:
 type ExternalSort struct {
-	inputFile  *os.File
-	outputFile *os.File
-	opts       Options
+	in           string
+	out          string
+	partitionDir string
+	size         int
 }
 
-//SortOptions :nodoc:
-type SortOptions func(*Options) error
-
-//Options :nodoc:
-type Options struct {
-	Size int
-}
-
-//DefaultOptions :nodoc:
-var DefaultOptions = Options{
-	Size: 100,
-}
-
-//SetPartitionSize :nodoc:
-func SetPartitionSize(size int) SortOptions {
-	return func(o *Options) error {
-		o.Size = size
-		return nil
+// New :nodoc:
+func New(in, out, partitionDir string, size int) *ExternalSort {
+	return &ExternalSort{
+		in:           in,
+		out:          out,
+		partitionDir: partitionDir,
+		size:         size,
 	}
 }
 
 //Sort :nodoc:
 func (e *ExternalSort) Sort() error {
-	numOfPartition, err := e.createPartition()
+	partitionFiles, err := e.createPartition()
 	if err != nil {
 		return err
 	}
 
-	err = e.mergeFile(numOfPartition)
+	err = e.mergeFile(partitionFiles)
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
-func (e *ExternalSort) mergeFile(numOfPartition int) error {
-	harr := make([]*Node, numOfPartition)
-	scan := make([]*bufio.Scanner, numOfPartition)
+func (e *ExternalSort) mergeFile(partitionFiles []string) error {
+	outFile, err := openFile(e.out)
+	if err != nil {
+		return err
+	}
+	defer outFile.Close()
 
-	for i := 0; i < numOfPartition; i++ {
-		v, err := e.openFile(fmt.Sprintf("./partition-%d", i))
+	numberOfFiles := len(partitionFiles)
+	harr := make([]*Node, numberOfFiles)
+	scan := make([]*bufio.Scanner, numberOfFiles)
+
+	for i, file := range partitionFiles {
+		v, err := openFile(file)
 		if err != nil {
 			return err
 		}
 		defer v.Close()
 
 		scanner := bufio.NewScanner(v)
+
+		// TODO
+		// Add customization
 		scanner.Split(bufio.ScanLines)
 		scan[i] = scanner
 
@@ -76,13 +76,13 @@ func (e *ExternalSort) mergeFile(numOfPartition int) error {
 		node.Index = i
 		harr[i] = node
 	}
-	heapSize := numOfPartition - 1
+	heapSize := numberOfFiles - 1
 	heap := NewHeapSort(&harr, heapSize)
 
 	count := 0
 	for count != heapSize {
 		root := heap.GetMin()
-		err := e.writeToFile(e.outputFile, root.Element)
+		err := writeToFile(outFile, root.Element)
 		if err != nil {
 			return err
 		}
@@ -97,72 +97,61 @@ func (e *ExternalSort) mergeFile(numOfPartition int) error {
 		heap.ReplaceMin(root)
 	}
 
-	return e.outputFile.Sync()
+	return outFile.Sync()
 }
 
-func (e *ExternalSort) openFile(path string) (*os.File, error) {
-	_, err := os.Stat(path)
-	if err != nil && os.IsNotExist(err) {
-		file, err := os.Create(path)
-		if err != nil {
-			return nil, err
-		}
-
-		return file, nil
-	}
-
-	f, err := os.OpenFile(path, os.O_RDWR, 0644)
+func (e *ExternalSort) createPartition() ([]string, error) {
+	inFile, err := openFile(e.in)
 	if err != nil {
 		return nil, err
 	}
+	defer inFile.Close()
 
-	return f, nil
-}
+	scanner := bufio.NewScanner(inFile)
 
-func (e *ExternalSort) writeToFile(file *os.File, data int) error {
-	_, err := file.WriteString(fmt.Sprintf("%d\n", data))
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (e *ExternalSort) createPartition() (int, error) {
-	numberOfFile := 0
-
-	scanner := bufio.NewScanner(e.inputFile)
+	//TODO
+	// Add customization on this part
 	scanner.Split(bufio.ScanLines)
-	arr := make([]int, e.opts.Size)
 
-	var i int
+	arr := make([]int, e.size)
+
+	var (
+		i, numberOfFile = 0, 0
+		partitionFile   []string
+	)
 	for ; ; numberOfFile++ {
-		file, err := e.openFile(fmt.Sprintf("./partition-%d", numberOfFile))
+		fn := fmt.Sprintf("%s/partition-%d", e.partitionDir, numberOfFile)
+		partitionFile = append(partitionFile, fn)
+		file, err := openFile(fn)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		defer file.Close()
 
 		cont := true
-		for i = 0; i < e.opts.Size; i++ {
+		for i = 0; i < e.size; i++ {
 			if !scanner.Scan() {
 				cont = false
 				break
 			}
 
+			// TODO
+			// Add customization on this part
 			res, err := strconv.Atoi(scanner.Text())
 			if err != nil {
-				return 0, err
+				return nil, err
 			}
 			arr[i] = res
 		}
 
+		// TODO
+		// Add more sort choices
 		sort.Ints(arr)
 
 		for j := 0; j < i; j++ {
-			err := e.writeToFile(file, arr[j])
+			err := writeToFile(file, arr[j])
 			if err != nil {
-				return 0, err
+				return nil, err
 			}
 		}
 		file.Sync()
@@ -172,5 +161,5 @@ func (e *ExternalSort) createPartition() (int, error) {
 		}
 	}
 
-	return numberOfFile, nil
+	return partitionFile, nil
 }

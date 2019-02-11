@@ -1,18 +1,18 @@
 package exsort
 
 import (
+	"path"
+	"runtime"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestSorting(t *testing.T) {
-	i, err := OpenFile(source)
-	assert.NoError(t, err)
+	_, filename, _, _ := runtime.Caller(0)
+	dir := path.Dir(filename)
 
-	o, err := OpenFile(output)
-	assert.NoError(t, err)
-
-	err = externalSort(i, o, size)
-	assert.NoError(t, err)
+	s := New(dir+"/file.txt", dir+"/out,txt", dir+"/out", 10000)
+	err := s.Sort()
+	if err != nil {
+		t.Fatalf("Error : %+v", err)
+	}
 }
